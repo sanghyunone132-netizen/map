@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>매지컬월드 서버 지도</title>
+
+<!-- 가독성 좋은 한국어 웹폰트 추가 -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+
+  /* 🔡 BoldDunggeunmo 폰트 */
+  @font-face {
+    font-family: 'Dunggeunmo';
+    src: url('./BoldDunggeunmo.ttf') format('truetype');
+  }
+
+  body {
+    margin: 0;
+    padding: 32px;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background:
+      radial-gradient(ellipse at 30% 40%, rgba(120,70,200,0.18), transparent 60%),
+      radial-gradient(ellipse at 80% 70%, rgba(160,90,255,0.10), transparent 70%),
+      linear-gradient(180deg, #2b1748 0%, #130a25 55%, #080412 100%);
+
+    font-family: 'Dunggeunmo', sans-serif;
+    color: #fff;
+  }
+
+  /* 전체 레이아웃 */
+  .shell {
+    display: flex;
+    gap: 28px;
+    width: 100%;
+    max-width: 1500px;
+    height: calc(100vh - 64px);
+  }
+
+  /* 지도 */
+  .map-wrapper {
+    position: relative;
+    flex: 7;
+    border-radius: 26px;
+    overflow: hidden;
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 22px 40px rgba(0,0,0,0.55);
+  }
+
+  .map-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: crisp-edges;
+  }
+
+  /* 📍 마커 */
+  .pixel-marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    text-align: center;
+    pointer-events: auto;
+    /* z-index는 JS에서 top 값 기준으로 설정 */
+  }
+
+  /* 항상 보이는 마름모 마커 (조금 줄임) */
+  .marker-diamond {
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border: 3px solid #000;
+    border-radius: 3px;
+    transform: rotate(45deg);
+    box-shadow: 0 0 8px rgba(255,255,255,0.6);
+    transition: 0.15s ease;
+  }
+
+  /* 클릭(active)된 마커 강조 — 진한 보라 */
+  .pixel-marker.active .marker-diamond {
+    background: #6b3df5;
+    border-color: #ffffff;
+    box-shadow:
+      0 0 6px rgba(107,61,245,0.9),
+      0 0 14px rgba(180,150,255,0.7);
+    transform: rotate(45deg) scale(1.15);
+  }
+
+  /* 🟣 말풍선 텍스트 (마커보다 위, 가로 한 줄) */
+  .pixel-bubble {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+
+    background: #222;
+    border: 5px solid #fff;
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 0 0 5px #000;
+
+    opacity: 0;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+
+    font-size: 20px;
+    pointer-events: none;
+
+    white-space: nowrap;           /* 줄바꿈 금지 */
+    writing-mode: horizontal-tb;   /* 무조건 가로쓰기 */
+
+    z-index: 2; /* 같은 마커 안에서 다이아몬드보다 위 */
+  }
+
+  /* hover 시 말풍선 표시 */
+  .pixel-marker:hover .pixel-bubble {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.0);
+  }
+
+  /* 좌표 헬퍼 */
+  .coord-helper {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    padding: 6px 10px;
+    font-size: 14px;
+    background: rgba(0,0,0,0.65);
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* 오른쪽 설명 패널 */
+  .side-panel {
+    flex: 4;
+    height: 100%;
+    padding: 32px;
+    border-radius: 22px;
+
+    background: linear-gradient(180deg, rgba(35,20,70,0.92), rgba(15,5,30,0.85));
+    border: 1px solid rgba(255,255,255,0.15);
+    box-shadow: 0 18px 35px rgba(0,0,0,0.55);
+
+    font-family: 'Noto Sans KR', sans-serif;
+    overflow-y: auto;
+  }
+
+  .panel-title {
+    font-size: 40px;
+    font-weight: 700;
+    margin: 8px 0 16px 0;
+    font-family: 'Dunggeunmo';
+  }
+
+  .panel-sub {
+    font-size: 22px;
+    opacity: 0.9;
+    margin-bottom: 16px;
+  }
+
+  .panel-body {
+    font-size: 22px;
+    line-height: 1.8;
+    opacity: 0.95;
+    white-space: pre-line;
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- 지도 -->
+  <div class="map-wrapper" id="mapWrapper">
+    <img src="map.png" class="map-image">
+
+    <!-- 마커들 (그대로 유지, data-img는 있어도 JS에선 안 씀) -->
+    <div class="pixel-marker" style="top: 30%; left: 52%;"
+      data-title="마법 학교"
+      data-sub="많은 학생들이 입학하여 마법을 배우는 장소."
+      data-body="
+      오래전부터 있던 학교인 만큼 비밀도 많은 것 같다.
+      최근 학교에서 학생들이 조용히 사라진다는 소문이 있다.">
+      <div class="pixel-bubble">마법 학교</div>
+      <div class="marker-diamond"></div>
+    </div>
+
+    <div class="pixel-marker" style="top: 23%; left: 59%;"
+      data-title="공동묘지"
+      data-sub="많은 사람들의 영혼이 잠들어 있는 장소."
+      data-body="
+      어쩌면 당신이 보고 있는 게
+      사람일 수도, 아닐 수도 있다.">
+      <div class="pixel-bubble">공동묘지</div>
+      <div class="marker-diamond"></div>
+    </div>
+
+    <div class="pixel-marker" style="top: 31%; left: 67%;"
+      data-title="도서관"
+      data-sub="인챈트 책을 파는 장소."
+      data-body="
+      대격변으로 인해 피난 온 사서 주민들이
+      최고 품질의 마법이 부여된 책을 판매한다.
+      
+      ◎ 위치한 상인 ◎
+      - 근거리 마법책 상인
+      - 원거리 마법책 상인
+      - 도구 마법책 상인
+      - 갑옷 마법책 상인
+      - 바다 마법책 상인
+      
+      지하에서는 게임하는 소리가 가끔 들린다.">
+      <div class="pixel-bubble">도서관</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 37.5%; left: 71%;"
+      data-title="대장간"
+      data-sub="장비를 강화할 수 있는 장소."
+      data-body="
+      강화 구슬과 매직피스만 있다면 장비를 강화할 수 있다.
+      어떤 속성의 강화 구슬을 사용하냐에 따라
+      그 속성의 힘이 증폭된다.">
+      <div class="pixel-bubble">대장간</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 51%; left: 66.5%;"
+      data-title="농부의 집"
+      data-sub="땅을 관리하는 장소."
+      data-body="
+      땅을 구매, 판매, 관리하거나,
+      대장 NPC에게 물건을 팔 수 있다.
+      
+      ◎ 위치한 상인 ◎
+      - 돼지대장
+      - 채소대장">
+      <div class="pixel-bubble">농부의 집</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 43.5%; left: 70%;"
+      data-title="서점"
+      data-sub="주문서를 판매하는 장소."
+      data-body="
+      마법사의 필수품, 주문서를 판매한다.
+      주문서에 두루마리를 등록하고 착용하면
+      주문을 시전할 수 있다.">
+      <div class="pixel-bubble">서점</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 41%; left: 64.5%;"
+      data-title="코스튬 상점"
+      data-sub="다양한 코스튬을 판매하는 장소."
+      data-body="
+      개성있는 코스튬을 싼 값에 구매할 수 있다.
+      
+      코스메틱 슬롯에 착용하면 갑옷의 효과 그대로
+      외형만 변경 가능하다.">
+      <div class="pixel-bubble">코스튬 상점</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 46%; left: 58%;"
+      data-title="눈사람의 집"
+      data-sub="추운 겨울, 따뜻한 선물을 판매하는 장소."
+      data-body="
+      구매자 본인은 열 수 없는 선물 상자를 판매한다.
+      
+      빨간 선물 상자: 마법 장신구 아이템을 랜덤하게 지급.
+      초록 선물 상자: 1 ~ 500 짤 중 랜덤하게 지급.">
+      <div class="pixel-bubble">눈사람의 집</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 54%; left: 55%;"
+      data-title="선술집"
+      data-sub="쌍둥이가 운영하는 포션을 판매하는 장소."
+      data-body="
+      전투에 도움이 되는 각종 마법 포션을 판매한다.">
+      <div class="pixel-bubble">선술집</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 35.5%; left: 32%;"
+      data-title="낚시터"
+      data-sub="휴식하며 낚시를 즐기는 장소."
+      data-body="
+      생태계 보존이 뛰어나
+      물고기가 잘 잡히는 기분이 든다.
+      
+      낚시는 자동으로 진행된다.">
+      <div class="pixel-bubble">낚시터</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 63%; left: 38.5%;"
+      data-title="상점가"
+      data-sub="각종 상인들이 위치한 장소."
+      data-body="
+      가장많은 상점과 상인들이 위치해 있다.
+      
+      ◎ 위치한 상인 ◎
+      - 광물상인
+      - 농작물상인
+      - 부산물상인
+      - 물고기상인
+      - 나무상인
+      - 몬스터상인
+      - 알상인
+      - 피마법상인
+      - 양봉대장">
+      <div class="pixel-bubble">상점가</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 50.5%; left: 39%;"
+      data-title="광장"
+      data-sub="만남의 장소."
+      data-body="
+      
+      기본적인 상인들과 퀘스트NPC가 자리하고 있다.
+      
+      ◎ 위치한 상인 ◎
+      - 야생이용권상인
+      - 네더이용권상인
+      - 자수정공주 자수민
+      - 보석상">
+      <div class="pixel-bubble">광장</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 40%; left: 25%;"
+      data-title="마법 공장"
+      data-sub="가공품을 납품하는 장소."
+      data-body="
+      철골렘에게 인기있는 곳으로
+      다양한 가공품을 납품할 수 있다.
+      
+      ◎ 위치한 상인 ◎
+      - 부품대장
+      - 구리대장
+      - 조각대장">
+      <div class="pixel-bubble">마법 공장</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 45.2%; left: 34%;"
+      data-title="옷 상점"
+      data-sub="다양한 모자와 패션 아이템을 판매하는 장소."
+      data-body="
+      저렴한 가격으로 자신의 패션을 뽐낼 수 있다.
+      300여종의 모자와 캐주얼한 옷을 판매한다.
+      
+      코스메틱 슬롯에 착용하면 갑옷의 효과 그대로
+      외형만 변경 가능하다.">
+      <div class="pixel-bubble">옷 상점</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 52%; left: 18%;"
+      data-title="항해보급선"
+      data-sub="맛있는 요리를 납품하는 장소."
+      data-body="
+      어떤 요리를 납품하냐에 따라 교환할 수 있는
+      강화 구슬이 달라진다.
+      
+      납품할 품목을 등록하고 요리를 납품하면
+      납품 영수증을 받을 수 있다.
+      
+      영수증은 다양한 강화 구슬로 교환 가능하다.
+      
+      ◎ 위치한 상인 ◎
+      - 제빵사
+      - 일식요리사
+      - 양식요리사
+      - 음료제조사">
+      <div class="pixel-bubble">항해보급선</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 61%; left: 50%;"
+      data-title="스폰"
+      data-sub="모든 플레이어의 모험이 시작되는 장소."
+      data-body="
+      매지컬 빌리지의 가장 기본이 되는 장소이다.">
+      <div class="pixel-bubble">스폰</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 63%; left: 61%;"
+      data-title="문화거리"
+      data-sub="문화생활을 위한 건물들이 위치한 장소."
+      data-body="
+      매지컬 빌리지의 문화생활에 특화된 지역이다.
+      메이드카페, 미술학원 등이 모여있다.">
+      <div class="pixel-bubble">문화거리</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <div class="pixel-marker" style="top: 61.5%; left: 84.4%;"
+      data-title="딥클라우드호"
+      data-sub="딥클라우드의 거대한 해적선"
+      data-body="
+      던전, 보스 토벌 등 다양한 항해를 할 수 있는
+      매지컬월드 최고의 해적 딥클라우드의 자가용이다.">
+      <div class="pixel-bubble">딥클라우드호</div>
+      <div class="marker-diamond"></div>
+    </div>
+    
+    <!-- 좌표 헬퍼 -->
+    <div class="coord-helper" id="coordHelper">top: --%; left: --%</div>
+  </div>
+
+  <!-- 설명 패널 -->
+  <div class="side-panel">
+    <h1 class="panel-title" id="infoTitle">매지컬 빌리지</h1>
+    <div class="panel-sub" id="infoSub">
+      매지컬월드 세계의 마을, 매지컬 빌리지의 지도입니다.
+    </div>
+
+    <div class="panel-body" id="infoBody">
+매지컬 빌리지는 "대격변"이 일어난
+매지컬월드 세계에서 살아남은 마을입니다.
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const markers = document.querySelectorAll(".pixel-marker");
+  const infoTitle = document.getElementById("infoTitle");
+  const infoSub = document.getElementById("infoSub");
+  const infoBody = document.getElementById("infoBody");
+  const mapWrapper = document.getElementById("mapWrapper");
+  const coordHelper = document.getElementById("coordHelper");
+
+  // 아래쪽에 있는 마커일수록 z-index를 높게 설정
+  function updateMarkerZIndex() {
+    markers.forEach(marker => {
+      const topStr = marker.style.top || "0";
+      const topValue = parseFloat(topStr); // "30%" → 30
+      const z = 100 + Math.round(topValue * 10); // 아래쪽일수록 더 높은 z
+      marker.style.zIndex = z;
+    });
+  }
+
+  updateMarkerZIndex();
+
+  // 클릭 시 설명 패널 업데이트 + 선택 마커 강조
+  markers.forEach(marker => {
+    marker.addEventListener("click", () => {
+      markers.forEach(m => m.classList.remove("active"));
+      marker.classList.add("active");
+
+      infoTitle.textContent = marker.dataset.title || "";
+      infoSub.textContent = marker.dataset.sub || "";
+      infoBody.textContent = marker.dataset.body || "";
+    });
+  });
+
+  // 좌표 표시
+  mapWrapper.addEventListener("mousemove", e => {
+    const rect = mapWrapper.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    coordHelper.textContent = `top: ${y.toFixed(1)}%; left: ${x.toFixed(1)}%;`;
+  });
+</script>
+
+</body>
+</html>
